@@ -1,0 +1,1249 @@
+{
+  "name": "Uptime Monitor — demo.realworld.io + Google Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "ea857659-82d4-4455-98df-db2d827b4ea0",
+      "name": "Schedule Trigger (1 hr)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1488,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.coingecko.com/api/v3/coins/markets",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "vs_currency",
+              "value": "usd"
+            },
+            {
+              "name": "order",
+              "value": "market_cap_desc"
+            },
+            {
+              "name": "per_page",
+              "value": "10"
+            },
+            {
+              "name": "page",
+              "value": "1"
+            },
+            {
+              "name": "sparkline",
+              "value": "false"
+            },
+            {
+              "name": "price_change_percentage",
+              "value": "24h"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {}
+          },
+          "timeout": 10000
+        }
+      },
+      "id": "f529886c-a69f-4c9e-a36a-94fb03dc873e",
+      "name": "CoinGecko — Top 10 Coins",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1248,
+        -64
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Keep only the top 5 coins by market cap rank\nconst coins = $input.all();\nconst items = coins[0].json;\n\nif (!Array.isArray(items)) {\n  throw new Error('CoinGecko response is not an array — possible rate limit or API error');\n}\n\nconst top5 = items\n  .sort((a, b) => a.market_cap_rank - b.market_cap_rank)\n  .slice(0, 5);\n\n// Return each coin as a separate item and persist full list in top item\nconst result = top5.map((coin, idx) => ({\n  json: {\n    rank:                coin.market_cap_rank,\n    id:                  coin.id,\n    symbol:              coin.symbol.toUpperCase(),\n    name:                coin.name,\n    current_price:       coin.current_price,\n    market_cap:          coin.market_cap,\n    price_change_24h_pct: coin.price_change_percentage_24h,\n    volume_24h:          coin.total_volume,\n    image:               coin.image,\n    is_top1:             idx === 0,\n    top5_summary:        idx === 0 ? top5.map(c =>\n      `#${c.market_cap_rank} ${c.symbol.toUpperCase()}: $${c.current_price.toLocaleString()} (${c.price_change_percentage_24h?.toFixed(2)}%)`\n    ).join('\\n') : null\n  }\n}));\n\nreturn result;\n"
+      },
+      "id": "30b9745d-c178-43f3-b276-4d00b1adb730",
+      "name": "Filter — Keep Top 5",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1008,
+        -64
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-is-top1",
+              "leftValue": "={{ $json.is_top1 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "75362ebb-a4fd-4b0f-93a1-c1c814cb6b29",
+      "name": "Filter — Top 1 Only",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        -768,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.coingecko.com/api/v3/coins/{{ $json.id }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "localization",
+              "value": "false"
+            },
+            {
+              "name": "tickers",
+              "value": "false"
+            },
+            {
+              "name": "market_data",
+              "value": "true"
+            },
+            {
+              "name": "community_data",
+              "value": "false"
+            },
+            {
+              "name": "developer_data",
+              "value": "false"
+            },
+            {
+              "name": "sparkline",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "3978a81a-82f4-44e9-8eb5-4267bac625a2",
+      "name": "CoinGecko — #1 Coin Detail",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -528,
+        -64
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge detail data with top5 summary from upstream\nconst detail = $input.first().json;\nconst md = detail.market_data;\n\nconst change24h = md?.price_change_percentage_24h ?? 0;\nconst price     = md?.current_price?.usd ?? 0;\nconst high24h   = md?.high_24h?.usd ?? 0;\nconst low24h    = md?.low_24h?.usd ?? 0;\nconst ath       = md?.ath?.usd ?? 0;\nconst athChange = md?.ath_change_percentage?.usd ?? 0;\nconst volume    = md?.total_volume?.usd ?? 0;\nconst mcap      = md?.market_cap?.usd ?? 0;\n\nconst sign = change24h >= 0 ? '+' : '';\n\nreturn [{\n  json: {\n    coin_id:     detail.id,\n    symbol:      detail.symbol?.toUpperCase(),\n    name:        detail.name,\n    price,\n    change24h,\n    change24h_formatted: `${sign}${change24h.toFixed(2)}%`,\n    high24h,\n    low24h,\n    ath,\n    ath_change_pct: athChange.toFixed(2),\n    volume_24h:  volume,\n    market_cap:  mcap,\n    is_bullish:  change24h > 5,\n    description: detail.description?.en?.slice(0, 200) ?? '',\n    timestamp:   new Date().toISOString()\n  }\n}];\n"
+      },
+      "id": "108ba5ea-64bc-48c3-a30b-7cf3441db693",
+      "name": "Parse Coin Detail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -288,
+        -64
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-bullish",
+              "leftValue": "={{ $json.change24h }}",
+              "rightValue": 5,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e1580f8e-621d-49b3-bef8-13f1cad05ccf",
+      "name": "IF — 24h Change > 5%",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -48,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build BULLISH ALERT Telegram message\nconst d = $input.first().json;\n\nconst msg = [\n  `🚀 *BULLISH ALERT — ${d.name} (${d.symbol})*`,\n  ``,\n  `💰 Price:       \\$${d.price.toLocaleString()}`,\n  `📈 24h Change:  ${d.change24h_formatted}`,\n  `📊 24h High:    \\$${d.high24h.toLocaleString()}`,\n  `📉 24h Low:     \\$${d.low24h.toLocaleString()}`,\n  `💎 Market Cap:  \\$${(d.market_cap / 1e9).toFixed(2)}B`,\n  `📦 Volume 24h:  \\$${(d.volume_24h / 1e9).toFixed(2)}B`,\n  ``,\n  `⚡ Strong upward momentum detected (+5% threshold exceeded)`,\n  ``,\n  `🕐 ${new Date(d.timestamp).toUTCString()}`\n].join('\\n');\n\nreturn [{ json: { telegram_message: msg, alert_type: 'BULLISH', ...d } }];\n"
+      },
+      "id": "3cd9266a-829b-41b6-a463-de97e3e12425",
+      "name": "Build Bullish Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        192,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build NORMAL UPDATE Telegram message\nconst d = $input.first().json;\nconst emoji = d.change24h >= 0 ? '🟢' : '🔴';\n\nconst msg = [\n  `${emoji} *Market Update — ${d.name} (${d.symbol})*`,\n  ``,\n  `💰 Price:       \\$${d.price.toLocaleString()}`,\n  `📊 24h Change:  ${d.change24h_formatted}`,\n  `📊 24h High:    \\$${d.high24h.toLocaleString()}`,\n  `📉 24h Low:     \\$${d.low24h.toLocaleString()}`,\n  `💎 Market Cap:  \\$${(d.market_cap / 1e9).toFixed(2)}B`,\n  `📦 Volume 24h:  \\$${(d.volume_24h / 1e9).toFixed(2)}B`,\n  ``,\n  `ℹ️  No significant movement (< 5% change in last 24h)`,\n  ``,\n  `🕐 ${new Date(d.timestamp).toUTCString()}`\n].join('\\n');\n\nreturn [{ json: { telegram_message: msg, alert_type: 'NORMAL', ...d } }];\n"
+      },
+      "id": "e2b98491-d0ab-4ac2-bb61-611235c6bab7",
+      "name": "Build Normal Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        192,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $credentials.telegramChatId }}",
+        "text": "={{ $json.telegram_message }}",
+        "additionalFields": {
+          "disable_notification": false,
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "b653ee39-d49a-4441-ba09-1b359ab297b2",
+      "name": "Telegram — Send Bullish Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        432,
+        -176
+      ],
+      "webhookId": "b7b3acd1-6237-49e3-ba54-4c50b8cbd743",
+      "credentials": {
+        "telegramApi": {
+          "id": "LXLHITCp60OamtIK",
+          "name": "Telegram account 4"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $credentials.telegramChatId }}",
+        "text": "={{ $json.telegram_message }}",
+        "additionalFields": {
+          "disable_notification": true,
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "bfcb0a7f-3c16-48ab-a7c0-9ed49abc6fab",
+      "name": "Telegram — Send Normal Update",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        432,
+        64
+      ],
+      "webhookId": "2ec9528c-c487-487f-aa4f-99c976d82591",
+      "credentials": {
+        "telegramApi": {
+          "id": "LXLHITCp60OamtIK",
+          "name": "Telegram account 4"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {},
+      "id": "cb128a8e-daec-4fa2-bdd7-795cb3646fba",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1344,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format error notification for Telegram\nconst err = $input.first().json;\n\nconst msg = [\n  `❌ *Workflow Error — Crypto Alert Pipeline*`,\n  ``,\n  `🔴 Node:     ${err.execution?.lastNodeExecuted ?? 'Unknown'}`,\n  `📝 Message:  ${err.error?.message ?? 'No message'}`,\n  `🆔 Exec ID:  ${err.execution?.id ?? 'N/A'}`,\n  `🕐 Time:     ${new Date().toUTCString()}`,\n  ``,\n  `⚠️ Please check the n8n execution log for full details.`\n].join('\\n');\n\nreturn [{ json: { telegram_message: msg } }];\n"
+      },
+      "id": "151bd5ff-16b8-4f4e-a611-42612539d364",
+      "name": "Format Error Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1120,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $credentials.telegramChatId }}",
+        "text": "={{ $json.telegram_message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "e7be3795-8e14-4f96-9034-b2992247a3f5",
+      "name": "Telegram — Send Error Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -848,
+        208
+      ],
+      "webhookId": "f11cacdf-fca8-41eb-95d7-69e42a6c3307",
+      "credentials": {
+        "telegramApi": {
+          "id": "LXLHITCp60OamtIK",
+          "name": "Telegram account 4"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "ad0eeee7-6eaf-41ca-a90a-4bebd958e1a6",
+      "name": "Schedule Trigger (5 min)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -5168,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Initialise check context\nreturn [{\n  json: {\n    target_url:   'https://demo.realworld.io',\n    check_time:   new Date().toISOString(),\n    attempt:      1,\n    max_attempts: 3\n  }\n}];\n"
+      },
+      "id": "f41ca701-36a2-47be-94c7-05e109776823",
+      "name": "Init Check Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4928,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.target_url }}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 3
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "id": "d20a0428-7cd4-4bb0-982c-711c697dbe86",
+      "name": "HTTP Check — Attempt 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -4688,
+        144
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Evaluate HTTP response from attempt 1\nconst ctx  = $('Init Check Context').first().json;\nconst resp = $input.first().json;\n\nconst statusCode   = resp.statusCode ?? resp.status ?? 0;\nconst responseTime = resp.headers?.['x-response-time'] \n                     ? parseInt(resp.headers['x-response-time']) \n                     : null;  // Approximation — real timing needs Benchmark node\nconst isUp         = statusCode >= 200 && statusCode < 300;\nconst hasError     = !!resp.error;\n\nreturn [{\n  json: {\n    ...ctx,\n    status_code:    statusCode,\n    is_up:          isUp && !hasError,\n    has_error:      hasError,\n    error_message:  resp.error?.message ?? null,\n    attempt:        1,\n    needs_retry:    (!isUp || hasError)\n  }\n}];\n"
+      },
+      "id": "c25f4bc4-2a2f-4c57-a059-4f19ad95e11b",
+      "name": "Evaluate Response 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4448,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "cond-retry1",
+              "leftValue": "={{ $json.needs_retry }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          }
+        },
+        "options": {}
+      },
+      "id": "a53e146b-4f65-408e-80ef-2e27f96e32fe",
+      "name": "IF — Retry Needed (1→2)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -4208,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 10
+      },
+      "id": "9f7be063-bd1a-490b-837d-4c0684b14ece",
+      "name": "Wait 10s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -3968,
+        16
+      ],
+      "webhookId": "wait-retry2"
+    },
+    {
+      "parameters": {
+        "url": "https://demo.realworld.io",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "id": "9df9d27f-b3ee-4352-9c49-d2ea9ce52a69",
+      "name": "HTTP Check — Attempt 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3728,
+        16
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nconst statusCode = resp.statusCode ?? resp.status ?? 0;\nconst isUp = statusCode >= 200 && statusCode < 300 && !resp.error;\nreturn [{ json: { status_code: statusCode, is_up: isUp, attempt: 2, needs_retry: !isUp, target_url: 'https://demo.realworld.io', check_time: new Date().toISOString() } }];\n"
+      },
+      "id": "ae906369-8eb0-4f66-8c72-2a072a74a6fb",
+      "name": "Evaluate Response 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3488,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "cond-retry2",
+              "leftValue": "={{ $json.needs_retry }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          }
+        },
+        "options": {}
+      },
+      "id": "9412c65f-594b-4f0c-ba88-653d5469d25c",
+      "name": "IF — Retry Needed (2→3)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -3248,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 15
+      },
+      "id": "5628ab58-da94-4bfd-8bcd-fef879635f29",
+      "name": "Wait 15s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -3008,
+        -96
+      ],
+      "webhookId": "wait-retry3"
+    },
+    {
+      "parameters": {
+        "url": "https://demo.realworld.io",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "id": "aaad364c-9f72-4eff-912e-6dcd006da414",
+      "name": "HTTP Check — Attempt 3 (Final)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2768,
+        -96
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nconst statusCode = resp.statusCode ?? resp.status ?? 0;\nconst isUp = statusCode >= 200 && statusCode < 300 && !resp.error;\nreturn [{ json: { status_code: statusCode, is_up: isUp, attempt: 3, needs_retry: false, target_url: 'https://demo.realworld.io', check_time: new Date().toISOString() } }];\n"
+      },
+      "id": "7b64bdba-87f5-4b6c-ae68-f28d6a2d3f05",
+      "name": "Evaluate Response 3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2528,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge the first-successful result OR the final retry result\nconst item = $input.first().json;\nconst isDown = !item.is_up;\n\nconst msg = isDown\n  ? [\n      `🔴 *DOWNTIME ALERT — demo.realworld.io*`,\n      ``,\n      `❌ Site is DOWN after 3 attempts`,\n      `🔢 Last HTTP Status: ${item.status_code || 'No Response'}`,\n      `🔁 Attempts Made: ${item.attempt}`,\n      `🕐 Detected At: ${new Date(item.check_time).toUTCString()}`,\n      ``,\n      `⚠️ Immediate investigation required!`\n    ].join('\\n')\n  : null;\n\nreturn [{ json: { ...item, should_alert: isDown, telegram_message: msg } }];\n"
+      },
+      "id": "1f985903-2921-44f2-b65c-8c53feb2172f",
+      "name": "Decide Alert Needed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2288,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "cond-alert",
+              "leftValue": "={{ $json.should_alert }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          }
+        },
+        "options": {}
+      },
+      "id": "624b0497-7b33-4b19-89e6-a82665f4333b",
+      "name": "IF — Site is Down",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -2048,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "=5390285897",
+        "text": "={{ $json.telegram_message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "e3eb11a4-f157-473b-b14c-2a5336ce4141",
+      "name": "Telegram — Downtime Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -1808,
+        16
+      ],
+      "webhookId": "fdd71eb1-5e6c-490e-8f58-b316012ee711",
+      "credentials": {
+        "telegramApi": {
+          "id": "LXLHITCp60OamtIK",
+          "name": "Telegram account 4"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst now = new Date();\n\nreturn [{\n  json: {\n    Date: now.toISOString().split('T')[0],\n    Time_UTC: now.toISOString().split('T')[1].replace('Z',''),\n    URL: d.target_url || '',\n    Status_Code: d.status_code ?? '',\n    Is_Up: d.is_up ? 'UP' : 'DOWN',\n    Attempts_Used: d.attempt || '',\n    Response_Time_ms: d.response_time_ms || 'N/A',\n    Notes: d.error_message || 'No response'\n  }\n}];"
+      },
+      "id": "4eba6035-9d42-4fe6-a79e-b39f31136aeb",
+      "name": "Prepare Sheets Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1856,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "6155b8d0-7d85-4867-908e-336c42a5ca09",
+      "name": "Daily Summary Trigger (08:00 UTC)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -5168,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "readRows",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $credentials.googleSheetsDocId }}",
+          "mode": "id"
+        }
+      },
+      "id": "51287a4b-5a96-466a-94cf-d3fdd5d032ce",
+      "name": "Google Sheets — Read Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        -4928,
+        432
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "coOSBXWpWtotBwhA",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build daily uptime summary\nconst rows = $input.all().map(i => i.json);\nconst today = new Date().toISOString().split('T')[0];\nconst todayRows = rows.filter(r => r.Date === today);\n\nconst total   = todayRows.length;\nconst upCount = todayRows.filter(r => r.Is_Up === 'UP').length;\nconst downCount = total - upCount;\nconst uptimePct = total > 0 ? ((upCount / total) * 100).toFixed(2) : 'N/A';\n\nconst avgAttempts = total > 0\n  ? (todayRows.reduce((s, r) => s + Number(r.Attempts_Used || 1), 0) / total).toFixed(1)\n  : 'N/A';\n\nconst status = parseFloat(uptimePct) >= 99 ? '✅ Healthy'\n             : parseFloat(uptimePct) >= 95 ? '⚠️ Degraded'\n             : '❌ Critical';\n\nconst msg = [\n  `📊 *Daily Uptime Report — ${today}*`,\n  ``,\n  `🌐 Target: https://demo.realworld.io`,\n  ``,\n  `✅ Checks Passed:  ${upCount} / ${total}`,\n  `❌ Checks Failed:  ${downCount}`,\n  `📈 Uptime:         ${uptimePct}%`,\n  `🔁 Avg Retries:   ${avgAttempts}`,\n  ``,\n  `Status: ${status}`,\n  ``,\n  `_Report generated at ${new Date().toUTCString()}_`\n].join('\\n');\n\nreturn [{ json: { telegram_message: msg, uptime_pct: uptimePct, date: today } }];\n"
+      },
+      "id": "16dca008-eed7-45c1-9f1c-1263e8b57e6b",
+      "name": "Build Daily Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4688,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $credentials.telegramChatId }}",
+        "text": "={{ $json.telegram_message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "0b2979fc-4aef-4805-96f5-c368c26bd2c4",
+      "name": "Telegram — Daily Summary",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -4448,
+        432
+      ],
+      "webhookId": "0690e452-a18d-4822-bc66-006e3897dff6",
+      "credentials": {
+        "telegramApi": {
+          "id": "LXLHITCp60OamtIK",
+          "name": "Telegram account 4"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1lVSV0JJJplRo-Y5-5ZYomwrfc611MCJ_ANX3-7ZPmyo",
+          "mode": "list",
+          "cachedResultName": "Uptime Monitor Logs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1lVSV0JJJplRo-Y5-5ZYomwrfc611MCJ_ANX3-7ZPmyo/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1lVSV0JJJplRo-Y5-5ZYomwrfc611MCJ_ANX3-7ZPmyo/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{$json.Date}}",
+            "Time_UTC": "={{$json.Time_UTC}}",
+            "URL": "={{$json.URL}}",
+            "Status_Code": "={{ $json.Status_Code }}",
+            "Is_Up": "={{$json.Is_Up}}",
+            "Attempts_Used": "={{$json.Attempts_Used}}",
+            "Response_Time_ms": "={{$json.Response_Time_ms}}",
+            "Notes": "={{$json.Notes}}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Time_UTC",
+              "displayName": "Time_UTC",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "URL",
+              "displayName": "URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status_Code",
+              "displayName": "Status_Code",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Is_Up",
+              "displayName": "Is_Up",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Attempts_Used",
+              "displayName": "Attempts_Used",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Response_Time_ms",
+              "displayName": "Response_Time_ms",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Notes",
+              "displayName": "Notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -1600,
+        256
+      ],
+      "id": "52480a3b-a841-4d5d-9289-4a16c3e60b1d",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "D916RmpIGqqBHUSj",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger (1 hr)": {
+      "main": [
+        [
+          {
+            "node": "CoinGecko — Top 10 Coins",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CoinGecko — Top 10 Coins": {
+      "main": [
+        [
+          {
+            "node": "Filter — Keep Top 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter — Keep Top 5": {
+      "main": [
+        [
+          {
+            "node": "Filter — Top 1 Only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter — Top 1 Only": {
+      "main": [
+        [
+          {
+            "node": "CoinGecko — #1 Coin Detail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CoinGecko — #1 Coin Detail": {
+      "main": [
+        [
+          {
+            "node": "Parse Coin Detail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Coin Detail": {
+      "main": [
+        [
+          {
+            "node": "IF — 24h Change > 5%",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF — 24h Change > 5%": {
+      "main": [
+        [
+          {
+            "node": "Build Bullish Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Normal Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Bullish Message": {
+      "main": [
+        [
+          {
+            "node": "Telegram — Send Bullish Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Normal Message": {
+      "main": [
+        [
+          {
+            "node": "Telegram — Send Normal Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Format Error Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Error Message": {
+      "main": [
+        [
+          {
+            "node": "Telegram — Send Error Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger (5 min)": {
+      "main": [
+        [
+          {
+            "node": "Init Check Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Init Check Context": {
+      "main": [
+        [
+          {
+            "node": "HTTP Check — Attempt 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Check — Attempt 1": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Response 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Response 1": {
+      "main": [
+        [
+          {
+            "node": "IF — Retry Needed (1→2)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF — Retry Needed (1→2)": {
+      "main": [
+        [
+          {
+            "node": "Wait 10s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Decide Alert Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 10s": {
+      "main": [
+        [
+          {
+            "node": "HTTP Check — Attempt 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Check — Attempt 2": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Response 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Response 2": {
+      "main": [
+        [
+          {
+            "node": "IF — Retry Needed (2→3)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF — Retry Needed (2→3)": {
+      "main": [
+        [
+          {
+            "node": "Wait 15s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Decide Alert Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 15s": {
+      "main": [
+        [
+          {
+            "node": "HTTP Check — Attempt 3 (Final)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Check — Attempt 3 (Final)": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Response 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Response 3": {
+      "main": [
+        [
+          {
+            "node": "Decide Alert Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide Alert Needed": {
+      "main": [
+        [
+          {
+            "node": "IF — Site is Down",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF — Site is Down": {
+      "main": [
+        [
+          {
+            "node": "Telegram — Downtime Alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare Sheets Row",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Telegram — Downtime Alert": {
+      "main": [
+        []
+      ]
+    },
+    "Prepare Sheets Row": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Summary Trigger (08:00 UTC)": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets — Read Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets — Read Log": {
+      "main": [
+        [
+          {
+            "node": "Build Daily Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Daily Summary": {
+      "main": [
+        [
+          {
+            "node": "Telegram — Daily Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionTimeout": -1,
+    "availableInMCP": false
+  },
+  "versionId": "b5e78fb7-1d75-40ff-8aa9-05526e814b09",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "636f8acae2e09a97034d6e62e2c4839005b1cbba49e501b57f53656e053c38a5"
+  },
+  "id": "6jtSMo4Q8VRqeRPC",
+  "tags": [
+    {
+      "name": "crypto-alert",
+      "id": "4AjIWSxo8CmqlLDM",
+      "updatedAt": "2026-06-02T07:12:10.151Z",
+      "createdAt": "2026-06-02T07:12:10.151Z"
+    },
+    {
+      "name": "uptime-monitor",
+      "id": "TCiwHDYGh45iy99c",
+      "updatedAt": "2026-06-02T07:12:31.201Z",
+      "createdAt": "2026-06-02T07:12:31.201Z"
+    }
+  ]
+}
